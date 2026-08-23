@@ -66,7 +66,7 @@ else
 fi
 
 # Generate the master squircle mask
-convert -size 256x256 xc:none -fill white -draw "roundrectangle 0,0 256,256 55,55" "$MASK_FILE"
+convert -size 256x256 xc:none -fill white -draw "roundrectangle 0,0 256,256 77,77" "$MASK_FILE"
 
 # Function to find best icon
 # Function to find best icon
@@ -141,7 +141,10 @@ for app_dir in "${APP_DIRS[@]}"; do
         fi
         
         # Extract Icon line
-        ICON_VALUE=$(grep -m 1 "^Icon=" "$desktop" | cut -d'=' -f2 | tr -d '\r')
+        ICON_VALUE=$(grep -m 1 "^X-Original-Icon=" "$desktop" | cut -d'=' -f2 | tr -d '\r')
+        if [ -z "$ICON_VALUE" ]; then
+            ICON_VALUE=$(grep -m 1 "^Icon=" "$desktop" | cut -d'=' -f2 | tr -d '\r')
+        fi
         [ -z "$ICON_VALUE" ] && continue
         
         ICON_PATH=""
@@ -169,6 +172,9 @@ for app_dir in "${APP_DIRS[@]}"; do
                         cp "$desktop" "$HOME/.local/share/applications/$desktop_base"
                         desktop="$HOME/.local/share/applications/$desktop_base"
                         chmod +x "$desktop"
+                    fi
+                    if ! grep -q "^X-Original-Icon=" "$desktop"; then
+                        sed -i "0,/^Icon=.*/s|^Icon=.*|X-Original-Icon=$ICON_VALUE\n&|" "$desktop"
                     fi
                     sed -i "s|^Icon=.*|Icon=$OUTPUT_FILE|" "$desktop"
                 fi
