@@ -140,6 +140,11 @@ for app_dir in "${APP_DIRS[@]}"; do
             continue
         fi
         
+        # Skip hidden apps
+        if grep -q "^NoDisplay=true" "$desktop"; then
+            continue
+        fi
+
         # Extract Icon line
         ICON_VALUE=$(grep -m 1 "^X-Original-Icon=" "$desktop" | cut -d'=' -f2 | tr -d '\r')
         if [ -z "$ICON_VALUE" ]; then
@@ -161,41 +166,39 @@ for app_dir in "${APP_DIRS[@]}"; do
                 ICON_PATH="$ICON_VALUE"
                 ICON_NAME="custom_${desktop_base%.*}"
                 OUTPUT_FILE="$OUTPUT_DIR/${ICON_NAME}.png"
-                
-                # Restore old backups from flawed in-place logic if they exist
-                if [[ "$ICON_VALUE" == "$HOME"* ]] && [ -f "${ICON_VALUE}.source_bak" ]; then
-                    mv "${ICON_VALUE}.source_bak" "$ICON_VALUE" 2>/dev/null || true
-                fi
-                
-                if [ "$MODE" != "test" ]; then
-                    if [[ "$app_dir" != "$HOME/.local/share/applications" ]]; then
-                        cp "$desktop" "$HOME/.local/share/applications/$desktop_base"
-                        desktop="$HOME/.local/share/applications/$desktop_base"
-                        chmod +x "$desktop"
-                    fi
-                    if ! grep -q "^X-Original-Icon=" "$desktop"; then
-                        sed -i "0,/^Icon=.*/s|^Icon=.*|X-Original-Icon=$ICON_VALUE\n&|" "$desktop"
-                    fi
-                    sed -i "s|^Icon=.*|Icon=$OUTPUT_FILE|" "$desktop"
-                fi
             fi
         else
             ICON_PATH=$(find_best_icon "$ICON_VALUE")
             ICON_NAME="$ICON_VALUE"
             OUTPUT_FILE="$OUTPUT_DIR/${ICON_NAME}.png"
-            
-            if [ "$MODE" != "test" ]; then
-                if [[ "$app_dir" != "$HOME/.local/share/applications" ]]; then
-                    cp "$desktop" "$HOME/.local/share/applications/$desktop_base"
-                    desktop="$HOME/.local/share/applications/$desktop_base"
-                fi
-                # Point explicitly to the new generated squircle
-                sed -i "s|^Icon=.*|Icon=$OUTPUT_FILE|" "$desktop"
-            fi
         fi
         
-        if [ -n "$ICON_PATH" ]; then
-            PROCESSED_APPS[$desktop_base]=1
+        if [ -z "$ICON_PATH" ]; then
+            continue
+        fi
+        
+        # Restore old backups from flawed in-place logic if they exist
+        if [[ "$ICON_VALUE" == "$HOME"* ]] && [ -f "${ICON_VALUE}.source_bak" ]; then
+            mv "${ICON_VALUE}.source_bak" "$ICON_VALUE" 2>/dev/null || true
+        fi
+        
+        if [ "$MODE" != "test" ]; then
+            if [[ "$app_dir" != "$HOME/.local/share/applications" ]]; then
+                cp "$desktop" "$HOME/.local/share/applications/$desktop_base"
+                desktop="$HOME/.local/share/applications/$desktop_base"
+                if [[ "$ICON_VALUE" == /* ]]; then
+                    chmod +x "$desktop"
+                fi
+            fi
+            if [[ "$ICON_VALUE" == /* ]]; then
+                if ! grep -q "^X-Original-Icon=" "$desktop"; then
+                    sed -i "0,/^Icon=.*/s|^Icon=.*|X-Original-Icon=$ICON_VALUE\n&|" "$desktop"
+                fi
+            fi
+            sed -i "s|^Icon=.*|Icon=$OUTPUT_FILE|" "$desktop"
+        fi
+        
+        PROCESSED_APPS[$desktop_base]=1
             
             # Skip logic
             needs_generation=1
@@ -312,7 +315,6 @@ for app_dir in "${APP_DIRS[@]}"; do
   <image xlink:href="data:image/png;base64,$base64_data" width="256" height="256"/>
 </svg>
 XML
-        fi
         fi
     done
 done
