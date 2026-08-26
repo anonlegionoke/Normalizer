@@ -7,14 +7,15 @@ import os
 import colorsys
 from PIL import Image
 
-# Manual intervention list for logos that are mathematically "single color edge" 
-# but are conceptually multi-colored and should fall back to White.
 FORCE_WHITE = ["google-chrome", "firefox", "chromium", "brave", "vivaldi", "microsoft-edge"]
 
 def get_bg_color(image_path, icon_name=""):
-    for fw in FORCE_WHITE:
-        if fw in icon_name.lower() or fw in image_path.lower():
-            return "HIST:#FFFFFF"
+    # Don't force white for webapps (PWAs like YouTube and Reddit) just because they have "firefox" in the path!
+    if "webapp" not in icon_name.lower() and "webapp" not in image_path.lower():
+        for fw in FORCE_WHITE:
+            # If the filename or the icon name matches the browser exactly, or contains it but isn't a PWA
+            if fw in icon_name.lower() or fw in os.path.basename(image_path).lower():
+                return "HIST:#FFFFFF"
             
     temp_png = None
     try:
@@ -65,7 +66,6 @@ def get_bg_color(image_path, icon_name=""):
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
         return "HIST:#FFFFFF"
         
-    # Edge dominance check using HSV for gradients
     hues = []
     for (r, g, b) in perimeter_pixels:
         h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
@@ -76,10 +76,8 @@ def get_bg_color(image_path, icon_name=""):
             
     hue_counter = collections.Counter(hues)
     
-    # Calculate the max region (combining a hue and its +1 neighbor to catch gradients that cross a boundary)
     max_count = 0
     best_hue_pair = None
-    
     grayscale_count = hue_counter["grayscale"]
     
     for h in range(12):
@@ -92,14 +90,48 @@ def get_bg_color(image_path, icon_name=""):
     
     result = "HIST:#FFFFFF"
     
-    # Lowered threshold to 0.55 so Seahorse (0.65) and Pika (0.60) pass!
-    # Browsers like Chrome (0.61) and Firefox (0.73) would pass this, but they are caught by FORCE_WHITE above!
     if grayscale_count / total_hues > 0.55:
+        # User requested: if the edge is white/gray (like Nautilus or Kooha), try to use the INSIDE color!
+        # Let's check the hues of ALL pixels to see if there is a dominant color inside.
+        all_inner_hues = []
+        for (r, g, b) in all_pixels:
+            h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+            if s >= 0.1 and v >= 0.1:
+                all_inner_hues.append(int(h * 12))
+        
+        if all_inner_hues:
+            inner_counter = collections.Counter(all_inner_hues)
+            max_inner_count = 0
+            best_inner_pair = None
+            for h in range(12):
+                count = inner_counter[h] + inner_counter[(h+1)%12]
+                if count > max_inner_count:
+                    max_inner_count = count
+                    best_inner_pair = (h, (h+1)%12)
+                    
+            # If the interior has a strong color (>30% of all pixels), use it instead of the gray edge!
+            if max_inner_count / len(all_pixels) > 0.30:
+                target_pixels = []
+                for (r, g, b) in all_pixels:
+                    h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+                    if s >= 0.1 and v >= 0.1 and int(h * 12) in best_inner_pair:
+                        target_pixels.append((r, g, b))
+                if target_pixels:
+                    avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
+                    avg_g = sum(c[1] for c in target_pixels) // len(target_pixels)
+                    avg_b = sum(c[2] for c in target_pixels) // len(target_pixels)
+                    result = f"HIST:#{avg_r:02x}{avg_g:02x}{avg_b:02x}"
+                    if temp_png and os.path.exists(temp_png): os.remove(temp_png)
+                    return result
+        
+        # Otherwise, fallback to the grayscale edge (e.g. for X, which is 100% black)
         target_pixels = [c for c in perimeter_pixels if (colorsys.rgb_to_hsv(c[0]/255, c[1]/255, c[2]/255)[1] < 0.1 or colorsys.rgb_to_hsv(c[0]/255, c[1]/255, c[2]/255)[2] < 0.1)]
-        avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
-        avg_g = sum(c[1] for c in target_pixels) // len(target_pixels)
-        avg_b = sum(c[2] for c in target_pixels) // len(target_pixels)
-        result = f"HIST:#{avg_r:02x}{avg_g:02x}{avg_b:02x}"
+        if target_pixels:
+            avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
+            avg_g = sum(c[1] for c in target_pixels) // len(target_pixels)
+            avg_b = sum(c[2] for c in target_pixels) // len(target_pixels)
+            result = f"HIST:#{avg_r:02x}{avg_g:02x}{avg_b:02x}"
+            
     elif max_count / total_hues > 0.55:
         target_pixels = []
         for (r, g, b) in perimeter_pixels:
