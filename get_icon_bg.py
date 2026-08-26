@@ -14,6 +14,9 @@ def get_bg_color(image_path, icon_name=""):
         for fw in FORCE_WHITE:
             if fw in icon_name.lower() or fw in os.path.basename(image_path).lower():
                 return "HIST:#FFFFFF"
+                
+    if "org.gnome.weather" in icon_name.lower() or "org.gnome.weather" in image_path.lower():
+        return "HIST:#f6e88c"
             
     temp_png = None
     try:
@@ -61,21 +64,21 @@ def get_bg_color(image_path, icon_name=""):
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
         return "HIST:#FFFFFF"
         
-    # 1. Monochrome Logo Contrast Check
-    # If the ENTIRE logo is strictly grayscale/black/white (>95%), we MUST provide a contrasting background 
-    # so that it doesn't blend in and disappear (e.g. Light Gray Settings gear on Light Gray background).
     if gray_count_all / total_count_all > 0.95:
         avg_brightness = sum(c[0]*0.299 + c[1]*0.587 + c[2]*0.114 for c in all_pixels) / len(all_pixels)
+        perim_brightness = sum(c[0]*0.299 + c[1]*0.587 + c[2]*0.114 for c in perimeter_pixels) / len(perimeter_pixels)
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
         
-        # If the logo is mostly light (white/light gray), give it a Dark background
+        # If the perimeter is pure white, it's a solid white block (like Claude or Devin).
+        # We want these to seamlessly expand into a White background!
+        if perim_brightness > 250:
+            return "HIST:#FFFFFF"
+        
         if avg_brightness > 128:
             return "HIST:#333333"
         else:
-            # If the logo is mostly dark (black/dark gray), give it a Light background
             return "HIST:#FFFFFF"
             
-    # 2. Edge dominance check using HSV for gradients
     hues = []
     for (r, g, b) in perimeter_pixels:
         h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
@@ -99,7 +102,6 @@ def get_bg_color(image_path, icon_name=""):
     result = "HIST:#FFFFFF"
     
     if grayscale_count / total_hues > 0.55:
-        # User requested: if the edge is white/gray (like Nautilus or Kooha), try to use the INSIDE color!
         all_inner_hues = []
         for (r, g, b) in all_pixels:
             h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
@@ -130,7 +132,6 @@ def get_bg_color(image_path, icon_name=""):
                     if temp_png and os.path.exists(temp_png): os.remove(temp_png)
                     return result
         
-        # Otherwise, fallback to the grayscale edge color (e.g. for monochrome edges that aren't fully monochrome logos)
         target_pixels = [c for c in perimeter_pixels if (colorsys.rgb_to_hsv(c[0]/255, c[1]/255, c[2]/255)[1] < 0.1 or colorsys.rgb_to_hsv(c[0]/255, c[1]/255, c[2]/255)[2] < 0.1)]
         if target_pixels:
             avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
