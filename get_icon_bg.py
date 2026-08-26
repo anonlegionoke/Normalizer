@@ -10,10 +10,8 @@ from PIL import Image
 FORCE_WHITE = ["google-chrome", "firefox", "chromium", "brave", "vivaldi", "microsoft-edge"]
 
 def get_bg_color(image_path, icon_name=""):
-    # Don't force white for webapps (PWAs like YouTube and Reddit) just because they have "firefox" in the path!
     if "webapp" not in icon_name.lower() and "webapp" not in image_path.lower():
         for fw in FORCE_WHITE:
-            # If the filename or the icon name matches the browser exactly, or contains it but isn't a PWA
             if fw in icon_name.lower() or fw in os.path.basename(image_path).lower():
                 return "HIST:#FFFFFF"
             
@@ -30,24 +28,30 @@ def get_bg_color(image_path, icon_name=""):
         return "HIST:#FFFFFF"
         
     width, height = img.size
-    
     bbox = img.getbbox()
     if not bbox:
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
         return "HIST:#FFFFFF"
         
     left, upper, right, lower = bbox
-    
     all_pixels = []
     perimeter_pixels = []
     
     margin_x = max(1, int((right - left) * 0.05))
     margin_y = max(1, int((lower - upper) * 0.05))
     
+    gray_count_all = 0
+    total_count_all = 0
+    
     for y in range(upper, lower):
         for x in range(left, right):
             r, g, b, a = img.getpixel((x, y))
             if a > 128:
+                total_count_all += 1
+                h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+                if s < 0.1 or v < 0.1:
+                    gray_count_all += 1
+                
                 all_pixels.append((r, g, b))
                 if (x < left + margin_x) or (x > right - margin_x - 1) or \
                    (y < upper + margin_y) or (y > lower - margin_y - 1):
@@ -57,15 +61,21 @@ def get_bg_color(image_path, icon_name=""):
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
         return "HIST:#FFFFFF"
         
-    def quantize(color): return (color[0] // 64 * 64, color[1] // 64 * 64, color[2] // 64 * 64)
-    q_all = [quantize(c) for c in all_pixels]
-    all_counter = collections.Counter(q_all)
-    all_ratio = all_counter.most_common(1)[0][1] / len(q_all)
-    
-    if all_ratio > 0.98:
+    # 1. Monochrome Logo Contrast Check
+    # If the ENTIRE logo is strictly grayscale/black/white (>95%), we MUST provide a contrasting background 
+    # so that it doesn't blend in and disappear (e.g. Light Gray Settings gear on Light Gray background).
+    if gray_count_all / total_count_all > 0.95:
+        avg_brightness = sum(c[0]*0.299 + c[1]*0.587 + c[2]*0.114 for c in all_pixels) / len(all_pixels)
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
-        return "HIST:#FFFFFF"
         
+        # If the logo is mostly light (white/light gray), give it a Dark background
+        if avg_brightness > 128:
+            return "HIST:#333333"
+        else:
+            # If the logo is mostly dark (black/dark gray), give it a Light background
+            return "HIST:#FFFFFF"
+            
+    # 2. Edge dominance check using HSV for gradients
     hues = []
     for (r, g, b) in perimeter_pixels:
         h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
@@ -75,7 +85,6 @@ def get_bg_color(image_path, icon_name=""):
             hues.append(int(h * 12))
             
     hue_counter = collections.Counter(hues)
-    
     max_count = 0
     best_hue_pair = None
     grayscale_count = hue_counter["grayscale"]
@@ -87,12 +96,10 @@ def get_bg_color(image_path, icon_name=""):
             best_hue_pair = (h, (h+1)%12)
             
     total_hues = len(hues)
-    
     result = "HIST:#FFFFFF"
     
     if grayscale_count / total_hues > 0.55:
         # User requested: if the edge is white/gray (like Nautilus or Kooha), try to use the INSIDE color!
-        # Let's check the hues of ALL pixels to see if there is a dominant color inside.
         all_inner_hues = []
         for (r, g, b) in all_pixels:
             h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
@@ -109,7 +116,6 @@ def get_bg_color(image_path, icon_name=""):
                     max_inner_count = count
                     best_inner_pair = (h, (h+1)%12)
                     
-            # If the interior has a strong color (>30% of all pixels), use it instead of the gray edge!
             if max_inner_count / len(all_pixels) > 0.30:
                 target_pixels = []
                 for (r, g, b) in all_pixels:
@@ -124,7 +130,7 @@ def get_bg_color(image_path, icon_name=""):
                     if temp_png and os.path.exists(temp_png): os.remove(temp_png)
                     return result
         
-        # Otherwise, fallback to the grayscale edge (e.g. for X, which is 100% black)
+        # Otherwise, fallback to the grayscale edge color (e.g. for monochrome edges that aren't fully monochrome logos)
         target_pixels = [c for c in perimeter_pixels if (colorsys.rgb_to_hsv(c[0]/255, c[1]/255, c[2]/255)[1] < 0.1 or colorsys.rgb_to_hsv(c[0]/255, c[1]/255, c[2]/255)[2] < 0.1)]
         if target_pixels:
             avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
