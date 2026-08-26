@@ -4,6 +4,7 @@ import collections
 import subprocess
 import tempfile
 import os
+import colorsys
 from PIL import Image
 
 def get_bg_color(image_path):
@@ -29,8 +30,6 @@ def get_bg_color(image_path):
     left, upper, right, lower = bbox
     
     # 1. Mono-color check
-    # If the entire non-transparent part of the logo is just ONE color (like ChatGPT's black logo),
-    # using that color as a background will make it invisible.
     all_pixels = []
     perimeter_pixels = []
     
@@ -51,31 +50,44 @@ def get_bg_color(image_path):
         return "HIST:#FFFFFF"
         
     def quantize(color): return (color[0] // 64 * 64, color[1] // 64 * 64, color[2] // 64 * 64)
-    def quantize_coarse(color): return (color[0] // 128 * 128, color[1] // 128 * 128, color[2] // 128 * 128)
     
     q_all = [quantize(c) for c in all_pixels]
     all_counter = collections.Counter(q_all)
     all_ratio = all_counter.most_common(1)[0][1] / len(q_all)
     
-    # If the logo is essentially a single solid color shape (e.g. > 98%), fall back to white/contrast
     if all_ratio > 0.98:
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
         return "HIST:#FFFFFF"
         
-    # 2. Edge dominance check (Use coarse quantization for gradients like LibreOffice!)
-    q_perim = [quantize_coarse(c) for c in perimeter_pixels]
-    perim_counter = collections.Counter(q_perim)
+    # 2. Edge dominance check using HSV for gradients
+    hues = []
+    for (r, g, b) in perimeter_pixels:
+        h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        if s < 0.1 or v < 0.1:
+            hues.append("grayscale")
+        else:
+            hues.append(int(h * 12)) # 12 bins = 30 degrees each
+            
+    hue_counter = collections.Counter(hues)
+    most_common_hue, most_common_count = hue_counter.most_common(1)[0]
+    hue_ratio = most_common_count / len(hues)
     
-    most_common_color, most_common_count = perim_counter.most_common(1)[0]
-    perim_ratio = most_common_count / len(q_perim)
-    
-    # If a color dominates the edge (>50%), use it!
-    if perim_ratio > 0.50:
-        target_q = most_common_color
-        exact_pixels = [c for c in perimeter_pixels if quantize_coarse(c) == target_q]
-        avg_r = sum(c[0] for c in exact_pixels) // len(exact_pixels)
-        avg_g = sum(c[1] for c in exact_pixels) // len(exact_pixels)
-        avg_b = sum(c[2] for c in exact_pixels) // len(exact_pixels)
+    # If a hue (or grayscale) dominates the edge (>70%), we use it!
+    # A single-color gradient will easily score 90-100% here.
+    # A multi-color icon (Firefox, Chrome) will score ~30-40%.
+    if hue_ratio > 0.70:
+        # Extract the exact average of ONLY the pixels that fell into the dominant hue bucket
+        # so we get an accurate, pleasant color (ignoring the tiny bit of antialiasing noise)
+        target_pixels = []
+        for (r, g, b) in perimeter_pixels:
+            h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+            curr_hue = "grayscale" if (s < 0.1 or v < 0.1) else int(h * 12)
+            if curr_hue == most_common_hue:
+                target_pixels.append((r, g, b))
+                
+        avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
+        avg_g = sum(c[1] for c in target_pixels) // len(target_pixels)
+        avg_b = sum(c[2] for c in target_pixels) // len(target_pixels)
         result = f"HIST:#{avg_r:02x}{avg_g:02x}{avg_b:02x}"
     else:
         result = "HIST:#FFFFFF"
