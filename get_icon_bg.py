@@ -68,12 +68,8 @@ def get_bg_color(image_path, icon_name=""):
         avg_brightness = sum(c[0]*0.299 + c[1]*0.587 + c[2]*0.114 for c in all_pixels) / len(all_pixels)
         perim_brightness = sum(c[0]*0.299 + c[1]*0.587 + c[2]*0.114 for c in perimeter_pixels) / len(perimeter_pixels)
         if temp_png and os.path.exists(temp_png): os.remove(temp_png)
-        
-        # If the perimeter is pure white, it's a solid white block (like Claude or Devin).
-        # We want these to seamlessly expand into a White background!
         if perim_brightness > 250:
             return "HIST:#FFFFFF"
-        
         if avg_brightness > 128:
             return "HIST:#333333"
         else:
@@ -122,8 +118,17 @@ def get_bg_color(image_path, icon_name=""):
                 target_pixels = []
                 for (r, g, b) in all_pixels:
                     h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
-                    if s >= 0.1 and v >= 0.1 and int(h * 12) in best_inner_pair:
+                    # Filter for HIGH SATURATION to get the most vibrant extraction
+                    if s >= 0.4 and v >= 0.1 and int(h * 12) in best_inner_pair:
                         target_pixels.append((r, g, b))
+                        
+                # Fallback to lower saturation if no high-saturation pixels exist
+                if not target_pixels:
+                    for (r, g, b) in all_pixels:
+                        h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+                        if s >= 0.1 and v >= 0.1 and int(h * 12) in best_inner_pair:
+                            target_pixels.append((r, g, b))
+                            
                 if target_pixels:
                     avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
                     avg_g = sum(c[1] for c in target_pixels) // len(target_pixels)
@@ -143,10 +148,16 @@ def get_bg_color(image_path, icon_name=""):
         target_pixels = []
         for (r, g, b) in perimeter_pixels:
             h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
-            if s >= 0.1 and v >= 0.1:
-                curr_hue = int(h * 12)
-                if curr_hue in best_hue_pair:
+            # Same high saturation filter for edge colors
+            if s >= 0.4 and v >= 0.1 and int(h * 12) in best_hue_pair:
+                target_pixels.append((r, g, b))
+                
+        if not target_pixels:
+            for (r, g, b) in perimeter_pixels:
+                h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+                if s >= 0.1 and v >= 0.1 and int(h * 12) in best_hue_pair:
                     target_pixels.append((r, g, b))
+                    
         if target_pixels:
             avg_r = sum(c[0] for c in target_pixels) // len(target_pixels)
             avg_g = sum(c[1] for c in target_pixels) // len(target_pixels)
